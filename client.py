@@ -24,7 +24,7 @@ def get_menu(client_socket):
 	client_socket.send(request.encode('utf-8'))
 	response = client_socket.recv(4096)
 	menu = json.loads(response.decode('utf-8'))
-	print(menu)
+	print(json.dumps(menu, indent=4))
 
 def client():
 	client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
