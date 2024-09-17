@@ -1,5 +1,6 @@
 import socket
 import json
+from http.client import responses
 
 
 def place_order(client_socket, customer_id, items, discount_code=None):
@@ -25,6 +26,42 @@ def get_menu(client_socket):
 	response = client_socket.recv(4096)
 	menu = json.loads(response.decode('utf-8'))
 	print(json.dumps(menu, indent=4))
+
+def get_history(client_socket, customer_id, discount_applied):
+	request_data = {
+		'action': 'get_history',
+		'customer_id': customer_id,
+		'discount_code': discount_applied,
+	}
+
+	request = json.dumps(request_data)
+	client_socket.send(request.encode('utf-8'))
+	response = client_socket.recv(4096)
+	print(response.decode('utf-8'))
+
+def get_fav_item(client_socket, customer_id):
+	request_data = {
+		'action': 'get_favourite_item',
+		'customer_id': customer_id
+	}
+
+	request = json.dumps(request_data)
+	client_socket.send(request.encode('utf-8'))
+	response = client_socket.recv(4096)
+	print(response.decode('utf-8'))
+
+def register_user(client_socket, username, gender, birthdate, phone, address, password):
+	request_data = {
+		'action': 'register',
+		'username': username,
+
+
+
+
+
+
+
+	}
 
 def client():
 	client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
