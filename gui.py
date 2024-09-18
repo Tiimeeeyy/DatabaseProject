@@ -3,7 +3,8 @@ import socket
 import tkinter as tk
 from tkinter import messagebox
 
-from client import global_key
+from password_handler import hash_pw
+from client import global_key, client
 from encryption import encrypt, decrypt
 
 class LoginApp:
@@ -23,6 +24,9 @@ class LoginApp:
 
         self.login_button = tk.Button(root, text="Login", command=self.login)
         self.login_button.pack()
+
+        self.register_button = tk.Button(root, text="Register", command = self.open_register_window)
+        self.register_button.pack()
 
     def login(self):
         username = self.username_entry.get()
@@ -55,6 +59,68 @@ class LoginApp:
         client_socket.close()
         return response_data.get('status') == 'success'
 
+    def open_register_window(self):
+        register_window = tk.Toplevel(self.root)
+        register_window.title("Register")
+
+        tk.Label(register_window, text="Username").pack()
+        username_entry = tk.Entry(register_window)
+        username_entry.pack()
+
+        tk.Label(register_window, text = "Password").pack()
+        password_entry = tk.Entry(register_window, show="*")
+        password_entry.pack()
+
+        tk.Label(register_window, text="Phone number").pack()
+        phone_entry = tk.Entry(register_window)
+        phone_entry.pack()
+
+        tk.Label(register_window, text="Address").pack()
+        address_entry = tk.Entry(register_window)
+        address_entry.pack()
+
+        tk.Label(register_window, text="Gender").pack()
+        gender_entry = tk.Entry(register_window)
+        gender_entry.pack()
+
+        tk.Label(register_window, text="Birthdate (YYYY-MM-DD)").pack()
+        birthdate_entry = tk.Entry(register_window)
+        birthdate_entry.pack()
+
+        register_button = tk.Button(register_window, text="Register", command=lambda: self.register_user(
+            username_entry.get(), password_entry.get(), gender_entry.get(), birthdate_entry.get(), phone_entry.get(), address_entry.get(), register_window))
+        register_button.pack()
+
+    def register_user(self, username, password, gender, birthdate, phone, address, window):
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(('127.0.0.1', 9999))
+
+        client_socket.send(global_key)
+
+        request = {
+            'action': 'register',
+            'username': username,
+            'password': hash_pw(password),
+            'gender': gender,
+            'birthdate': birthdate,
+            'phone': phone,
+            'address':address
+        }
+
+        encrypted_request = encrypt(json.dumps(request), global_key)
+        client_socket.send(encrypted_request.encode('utf-8'))
+
+        response = client_socket.recv(1024).decode('utf8')
+        decrypted_response = decrypt(response, global_key)
+        response_data = json.loads(decrypted_response)
+
+        client_socket.close()
+
+        if response_data.get('status') == 'success':
+            messagebox.showinfo("Registration Successful", "User registered successfully!")
+            window.destroy()
+        else:
+            messagebox.showerror("Registration failed!", response_data.get('error'))
 
 class PizzaApp:
     def __init__(self, root, username):

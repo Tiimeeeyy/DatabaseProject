@@ -29,9 +29,9 @@ def handle_client(client_socket):
                         customer_id = request_data['customer_id']
                         items = request_data['items']
                         discount_code = request_data.get('discount_code')
-                        place_order(cursor, customer_id, items, discount_code)
+                        confirmation_details = place_order(cursor, customer_id, items, discount_code)
                         conn.commit()
-                        client_socket.send(b"Order placed successfully!")
+                        response = json.dumps(confirmation_details)
                     case 'get_menu':
                         menu = get_menu(cursor)
                         client_socket.send(json.dumps(menu).encode('utf-8'))
@@ -80,42 +80,46 @@ def handle_client(client_socket):
             conn.close()
         client_socket.close()
 
-
-def place_order(cursor, customer_id, items, discount_code=None):
-    total_price = 0
-    for item in items:
-        item_type, item_id, quantity = item
-        if item_type == 'pizza':
-            cursor.execute('SELECT price FROM Pizzas WHERE id = ?', (item_id,))
-        elif item_type == 'drink':
-            cursor.execute('SELECT price FROM Drinks WHERE id = ?', (item_id,))
-        elif item_type == 'dessert':
-            cursor.execute('SELECT price FROM Deserts WHERE id = ?', (item_id,))
-        price = cursor.fetchone()[0]
-        total_price += price * quantity
-
-    discount_applied = False
-    if discount_code:
-        cursor.execute('SELECT discount_code FROM Customers WHERE id = ?', (customer_id,))
-        code_store = cursor.fetchone()[0]
-        if code_store == discount_code:
-            total_price *= 0.9  # 10% discount
-            discount_applied = True
-            cursor.execute('UPDATE Costumers SET discount_code = NULL WHERE id = ?', (customer_id,))
-
-    order_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cursor.execute('''
-	INSERT INTO Orders (customer_id, order_date, status, discount_applied, total_price)
-	VALUES (?,?,?,?,?)
-	''', (customer_id, order_date, 'placed', discount_applied, total_price))
+def place_order(cursor, customer_id, items, discount_code = None):
+    cursor.execute('INSERT INTO Orders (customer_id, discount_code, order_time) VALUES (?, ?, ?)',
+                   (customer_id, discount_code, datetime.now()))
     order_id = cursor.lastrowid
 
-    for item in items:
-        item_type, item_id, quantity = item
-        cursor.execute('''
-		INSERT INTO OrderItems (order_id, item_type, item_id, quantity)
-		VALUES (?,?,?,?)
-		''', (order_id, item_type, item_id, quantity))
+    for item_type, item_id, quantity in items:
+        cursor.execute('INSERT INTO OrderItems (order_id, item_type, item_id, quantity) VALUES (?,?,?,?)',
+                       (order_id, item_type, item_id, quantity))
+    estimated_delivery_time = datetime.now() * datetime.timedelta(minutes = 30)
+
+    cursor.execute('''
+        SELECT o.id, oi.order_time, oi.item_id, p.name AS pizza_name, d.name AS drink_name, ds.name AS desert_name
+        FROM Orders o
+        JOIN OrderItems oi ON o.id = oi.order_id
+        LEFT JOIN Pizzas p ON oi.item_type = 'pizza' AND oi.item_id = p.id
+        LEFT JOIN Drinks d ON io.item_type = 'drink' AND oi.item_id = d.id
+        LEFT JOIN Desserts ds ON io.item_type = 'dessert' AND io.item_id = ds.id
+        WHERE o.id = ?
+    ''', (order_id,))
+    order_details = cursor.fetchall()
+
+    confirmation_details = {
+        'order_id': order_id,
+        'order_time': order_details[0][1],
+        'estimated_delivery_time': estimated_delivery_time,
+        'items': []
+    }
+
+    for detail in order_details:
+        item = {
+            'item_type': detail[2],
+            'item_id': detail[3],
+            'quantity': detail[4],
+            'name': detail[5] or detail[6] or detail[7]
+        }
+        confirmation_details['items'].append(item)
+
+    return confirmation_details
+
+
 
 
 def get_menu(cursor):
