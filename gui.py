@@ -1,7 +1,10 @@
+import json
+import socket
 import tkinter as tk
 from tkinter import messagebox
-import socket
-import json
+
+from client import global_key
+from encryption import encrypt, decrypt
 
 class LoginApp:
     def __init__(self, root):
@@ -34,9 +37,24 @@ class LoginApp:
             messagebox.showerror("Login Failed", "Invalid username or password")
 
     def verify_credentials(self, username, password):
-        # Here you would typically send the credentials to the server for verification
-        # For simplicity, we'll just check if they match a hardcoded value
-        return username == "user" and password == "pass"
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(('127.0.0.1', 9999))
+
+        client_socket.send(global_key)
+
+        request = {'action': 'authenticate', 'username': username, 'pw_hash': password
+            # Replace with actual hashed password
+        }
+        encrypted_request = encrypt(json.dumps(request), global_key)
+        client_socket.send(encrypted_request.encode('utf-8'))
+
+        response = client_socket.recv(1024).decode('utf-8')
+        decrypted_response = decrypt(response, global_key)
+        response_data = json.loads(decrypted_response)
+
+        client_socket.close()
+        return response_data.get('status') == 'success'
+
 
 class PizzaApp:
     def __init__(self, root, username):
@@ -65,7 +83,7 @@ class PizzaApp:
         for category, items in self.menu.items():
             self.menu_listbox.insert(tk.END, f"--- {category} ---")
             for item in items:
-                self.menu_listbox.insert(tk.END, f"{item[1]} - ${item[2]}")
+                self.menu_listbox.insert(tk.END, f"{item['name']} - ${item['price']}")
 
         self.add_to_cart_button = tk.Button(self.menu_frame, text="Add to Cart", command=self.add_to_cart)
         self.add_to_cart_button.pack(pady=5)
@@ -83,12 +101,15 @@ class PizzaApp:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect(('127.0.0.1', 9999))
 
+        client_socket.send(global_key)
+
         request_data = {'action': 'get_menu'}
-        request = json.dumps(request_data)
-        client_socket.send(request.encode('utf-8'))
+        encrypted_request = encrypt(json.dumps(request_data), global_key)
+        client_socket.send(encrypted_request.encode('utf-8'))
 
         response = client_socket.recv(4096)
-        menu = json.loads(response.decode('utf-8'))
+        decrypted_response = decrypt(response.decode('utf-8'), global_key)
+        menu = json.loads(decrypted_response)
 
         client_socket.close()
         return menu
@@ -120,23 +141,18 @@ class PizzaApp:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect(('127.0.0.1', 9999))
 
-        request_data = {
-            'action': 'place_order',
-            'customer_id': 1,  # Example, should be determined based on actual user
-            'items': items,
-            'discount_code': None  # Example, can be modified to allow user to enter discount code
+        client_socket.send(global_key)
+
+        request_data = {'action': 'place_order', 'customer_id': 1,  # Example, should be determined based on actual user
+            'items': items, 'discount_code': None  # Example, can be modified to allow user to enter discount code
         }
-        request = json.dumps(request_data)
-        client_socket.send(request.encode('utf-8'))
+        encrypted_request = encrypt(json.dumps(request_data), global_key)
+        client_socket.send(encrypted_request.encode('utf-8'))
 
         response = client_socket.recv(1024)
-        messagebox.showinfo("Order Status", response.decode('utf-8'))
+        decrypted_response = decrypt(response.decode('utf-8'), global_key)
+        messagebox.showinfo("Order Status", decrypted_response)
 
         client_socket.close()
         self.cart.clear()
         self.cart_listbox.delete(0, tk.END)
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = LoginApp(root)
-    root.mainloop()

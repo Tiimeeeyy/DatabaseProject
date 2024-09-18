@@ -1,16 +1,8 @@
-import sqlite3
+def calculate_pizza_price(ingredient_cost):
+    base_price = sum(ingredient_cost)
 
-def update_schema():
-    conn = sqlite3.connect('pizza.db')
-    cursor = conn.cursor()
+    price_w_profit = base_price * 1.40
 
-    # Add the password_hash column if it doesn't exist
-    cursor.execute('''
-    ALTER TABLE Customers ADD COLUMN password_hash BLOB
-    ''')
+    final_price = price_w_profit * 1.09
 
-    conn.commit()
-    conn.close()
-
-if __name__ == "__main__":
-    update_schema()
+    return round(final_price, 2)
