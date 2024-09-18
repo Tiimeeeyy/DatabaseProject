@@ -38,7 +38,7 @@ def create_user(username, gender, birthdate, phone, address, password):
 
 # Checks if the given password and username match.
 def authenticate_user(cursor, username, password):
-	cursor.execute('SELECT password_hash FROM Customers WHERE username = ?', (username,))
+	cursor.execute('SELECT password_hash FROM Customers WHERE name = ?', (username,))
 	result = cursor.fetchnone()
 	if result:
 		stored_pw = result[0]

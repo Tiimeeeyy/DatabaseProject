@@ -1,154 +1,176 @@
+import json
 import socket
 import sqlite3
 import threading
-import json
 from datetime import datetime
-from dis import disco
+
+from encryption import decrypt
+from password_handler import create_user, authenticate_user
 
 
 def handle_client(client_socket):
-	conn = sqlite3.connect("pizza.db")
-	cursor = conn.cursor()
+    try:
+        conn = sqlite3.connect("pizza.db")
+        cursor = conn.cursor()
 
-	while True:
-		request = client_socket.recv(1024).decode('utf-8')
-		if not request:
-			break
+        global_key_server = client_socket.recv(16)
+        print(f"Received global key: {global_key_server}")
 
-		request_data = json.loads(request)
-		action = request_data['action']
-
-		if action == 'place_order':
-			customer_id = request_data['customer_id']
-			items = request_data['items']
-			discount_code = request_data.get('discount_code')
-			place_order(cursor, customer_id, items, discount_code)
-			conn.commit()
-			client_socket.send(b"Order placed successfully!")
-		elif action == 'get_menu':
-			menu = get_menu(cursor)
-			client_socket.send(json.dumps(menu).encode('utf-8'))
-		elif action == 'get_history':
-			customer_id = request_data['customer_id']
-			order_history = get_history(cursor, customer_id)
-			client_socket.send(json.dumps(order_history).encode('utf-8'))
-		elif action == 'get_favourite_item':
-			customer_id = request_data['customer_id']
-			favourite_items = get_favourite_item(cursor, customer_id)
-			if favourite_items:
-				client_socket.send(json.dumps({favourite_items}).encode('utf-8'))
-			else:
-				client_socket.send(json.dumps({'message': 'No purchases found to determine favorite item.'}).encode('utf-8'))
-		else:
-			client_socket.send(json.dumps({'error': 'Unknown action/procedure'}).encode('utf-8'))
-
-	conn.close()
-	client_socket.close()
+        while True:
+            try:
+                encrypted_request = client_socket.recv(1024).decode('utf-8')
+                if not encrypted_request:
+                    break
+                request = decrypt(encrypted_request, global_key_server)
+                request_data = json.loads(request)
+                action = request_data['action']
+                match action:
+                    case 'place_order':
+                        customer_id = request_data['customer_id']
+                        items = request_data['items']
+                        discount_code = request_data.get('discount_code')
+                        place_order(cursor, customer_id, items, discount_code)
+                        conn.commit()
+                        client_socket.send(b"Order placed successfully!")
+                    case 'get_menu':
+                        menu = get_menu(cursor)
+                        client_socket.send(json.dumps(menu).encode('utf-8'))
+                    case 'get_history':
+                        customer_id = request_data['customer_id']
+                        order_history = get_history(cursor, customer_id)
+                        client_socket.send(json.dumps(order_history).encode('utf-8'))
+                    case 'register':
+                        username = request_data['username']
+                        gender = request_data['gender']
+                        birthdate = request_data['birthdate']
+                        phone = request_data['phone']
+                        address = request_data['address']
+                        password = request_data['password']
+                        create_user(username, gender, birthdate, phone, address, password)
+                        client_socket.send(b"User registered successfully!")
+                    case 'authenticate':
+                        username = request_data['username']
+                        pw_hash = request_data['pw_hash']
+                        authenticate_user(cursor, username, pw_hash)
+                    case 'get_favourite_item':
+                        customer_id = request_data['customer_id']
+                        favourite_items = get_favourite_item(cursor, customer_id)
+                        if favourite_items:
+                            client_socket.send(json.dumps({favourite_items}).encode('utf-8'))
+                        else:
+                            client_socket.send(
+                                json.dumps({'message': 'No purchases found to determine favorite item.'}).encode(
+                                    'utf-8'))
+                    case _:
+                        client_socket.send(json.dumps({'error': 'Unknown action/procedure'}).encode('utf-8'))
+            except (json.JSONDecodeError, KeyError) as e:
+                client_socket.send(json.dumps({"'error': 'Invalid request format'"}).encode('utf-8'))
+                print(f"Error decoding request: {e}")
+            except sqlite3.DatabaseError as e:
+                client_socket.send(json.dumps({"'error': 'Database error'"}).encode('utf-8'))
+                print(f"Database error: {e}")
+            except Exception as e:
+                client_socket.send(json.dumps({"'error': 'Server error'"}).encode('utf-8'))
+                print(f"Exception! {e}")
+    except sqlite3.DatabaseError as e:
+        client_socket.send(json.dumps({"'error': 'failed to connect to database!'"}))
+        print(f"Failed to connect to database: {e}!")
+    finally:
+        if conn:
+            conn.close()
+        client_socket.close()
 
 
 def place_order(cursor, customer_id, items, discount_code=None):
-	total_price = 0
-	for item in items:
-		item_type, item_id, quantity = item
-		if item_type == 'pizza':
-			cursor.execute('SELECT price FROM Pizzas WHERE id = ?', (item_id,))
-		elif item_type == 'drink':
-			cursor.execute('SELECT price FROM Drinks WHERE id = ?', (item_id,))
-		elif item_type == 'dessert':
-			cursor.execute('SELECT price FROM Deserts WHERE id = ?', (item_id,))
-		price = cursor.fetchone()[0]
-		total_price += price * quantity
+    total_price = 0
+    for item in items:
+        item_type, item_id, quantity = item
+        if item_type == 'pizza':
+            cursor.execute('SELECT price FROM Pizzas WHERE id = ?', (item_id,))
+        elif item_type == 'drink':
+            cursor.execute('SELECT price FROM Drinks WHERE id = ?', (item_id,))
+        elif item_type == 'dessert':
+            cursor.execute('SELECT price FROM Deserts WHERE id = ?', (item_id,))
+        price = cursor.fetchone()[0]
+        total_price += price * quantity
 
-	discount_applied = False
-	if discount_code:
-		cursor.execute('SELECT discount_code FROM Customers WHERE id = ?', (customer_id,))
-		code_store = cursor.fetchone()[0]
-		if code_store == discount_code:
-			total_price *= 0.9  # 10% discount
-			discount_applied = True
-			cursor.execute('UPDATE Costumers SET discount_code = NULL WHERE id = ?', (customer_id,))
+    discount_applied = False
+    if discount_code:
+        cursor.execute('SELECT discount_code FROM Customers WHERE id = ?', (customer_id,))
+        code_store = cursor.fetchone()[0]
+        if code_store == discount_code:
+            total_price *= 0.9  # 10% discount
+            discount_applied = True
+            cursor.execute('UPDATE Costumers SET discount_code = NULL WHERE id = ?', (customer_id,))
 
-	order_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-	cursor.execute('''
+    order_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute('''
 	INSERT INTO Orders (customer_id, order_date, status, discount_applied, total_price)
 	VALUES (?,?,?,?,?)
 	''', (customer_id, order_date, 'placed', discount_applied, total_price))
-	order_id = cursor.lastrowid
+    order_id = cursor.lastrowid
 
-	for item in items:
-		item_type, item_id, quantity = item
-		cursor.execute('''
+    for item in items:
+        item_type, item_id, quantity = item
+        cursor.execute('''
 		INSERT INTO OrderItems (order_id, item_type, item_id, quantity)
 		VALUES (?,?,?,?)
 		''', (order_id, item_type, item_id, quantity))
 
+
 def get_menu(cursor):
-	cursor.execute('SELECT * FROM Pizzas')
-	pizzas = cursor.fetchall()
-	cursor.execute('SELECT * FROM Drinks')
-	drinks = cursor.fetchall()
-	cursor.execute('SELECT * FROM Desserts')
-	deserts = cursor.fetchall()
-	return {
-		'pizzas': pizzas,
-		'drinks': drinks,
-		'deserts': deserts
-	}
+    cursor.execute('SELECT * FROM Pizzas')
+    pizzas = cursor.fetchall()
+    cursor.execute('SELECT * FROM Drinks')
+    drinks = cursor.fetchall()
+    cursor.execute('SELECT * FROM Desserts')
+    deserts = cursor.fetchall()
+    return {'pizzas': pizzas, 'drinks': drinks, 'deserts': deserts}
+
 
 def get_history(cursor, customer_id, discount_applied):
-	cursor.execute('''
+    cursor.execute('''
 	SELECT id, order_date, status, discount_applied, total_price
 	FROM Orders
 	WHERE customer_id = ?
 	ORDER BY order_date DESC
 ''', (customer_id,))
-	orders = cursor.fetchall()
+    orders = cursor.fetchall()
 
-	order_history = []
-	for order in orders:
-		order_id, order_date, status, discount_applies, total_price = order
-		cursor.execute('''
+    order_history = []
+    for order in orders:
+        order_id, order_date, status, discount_applies, total_price = order
+        cursor.execute('''
 			SELECT item_type, item_id, quantity
 			FROM OrderItems
 			WHERE order_id = ?
 		''', (order_id,))
-		items = cursor.fetchall()
+        items = cursor.fetchall()
 
-		order_items = []
-		for item in items:
-			item_type, item_id, quantity = item
-			if item_type == 'pizza':
-				cursor.execute('SELECT name, price FROM Pizzas WHERE id = ?', (item_id))
-			elif item_type == 'drink':
-				cursor.execute('SELECT name, price FROM Drinks WHERE id = ?', (item_id,))
-			elif item_type == 'dessert':
-				cursor.execute('SELECT name, price FROM Desserts WHERE id = ?', (item_id,))
-			item_info = cursor.fetchone()
-			if item_info:
-				name, price = item_info
-				order_items.append({
-					'item_type': item_type,
-					'item_id': item_id,
-					'name': name,
-					'quantity': quantity,
-					'price': price
-				})
+        order_items = []
+        for item in items:
+            item_type, item_id, quantity = item
+            if item_type == 'pizza':
+                cursor.execute('SELECT name, price FROM Pizzas WHERE id = ?', (item_id,))
+            elif item_type == 'drink':
+                cursor.execute('SELECT name, price FROM Drinks WHERE id = ?', (item_id,))
+            elif item_type == 'dessert':
+                cursor.execute('SELECT name, price FROM Desserts WHERE id = ?', (item_id,))
+            item_info = cursor.fetchone()
+            if item_info:
+                name, price = item_info
+                order_items.append(
+                    {'item_type': item_type, 'item_id': item_id, 'name': name, 'quantity': quantity, 'price': price})
 
-		order_history.append(
-			{
-				'order_id': order_id,
-				'orer_date': order_date,
-				'status': status,
-				'discount_applied': discount_applied,
-				'total_price': total_price,
-				'items': order_items
-			})
+        order_history.append(
+            {'order_id': order_id, 'order_date': order_date, 'status': status, 'discount_applied': discount_applied,
+             'total_price': total_price, 'items': order_items})
 
-	return order_history
+    return order_history
 
 
 def get_favourite_item(cursor, customer_id):
-	query = """
+    query = """
 	WITH FilteredOrderItems AS(
 		SELECT
 			oi.customer_id,
@@ -207,32 +229,30 @@ def get_favourite_item(cursor, customer_id):
         ai.customer_id = ?
 	"""
 
-	cursor.execute(query, (customer_id, customer_id))
-	result = cursor.fetchall()
+    cursor.execute(query, (customer_id, customer_id))
+    result = cursor.fetchall()
 
-	favourite_items = []
-	for row in result:
-		customer_id, item_type, item_id, total_quantity, item_name = row
-		favourite_items.append({
-			'item_type': item_type,
-			'item_id': item_id,
-			'item_name': item_name,
-			'total_quantity': total_quantity
-		})
+    favourite_items = []
+    for row in result:
+        customer_id, item_type, item_id, total_quantity, item_name = row
+        favourite_items.append(
+            {'item_type': item_type, 'item_id': item_id, 'item_name': item_name, 'total_quantity': total_quantity})
 
-	return favourite_items
+    return favourite_items
+
 
 def server():
-	server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	server_socket.bind(('0.0.0.0', 9999))
-	server_socket.listen(5)
-	print("Server listening on port 9999")
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('0.0.0.0', 9999))
+    server_socket.listen(5)
+    print("Server listening on port 9999")
 
-	while True:
-		client_socket, addr = server_socket.accept()
-		print(f"Accepted connection from {addr}")
-		client_handler = threading.Thread(target=handle_client, args=(client_socket,))
-		client_handler.start()
+    while True:
+        client_socket, addr = server_socket.accept()
+        print(f"Accepted connection from {addr}")
+        client_handler = threading.Thread(target=handle_client, args=(client_socket,))
+        client_handler.start()
+
 
 if __name__ == "__main__":
-	server()
+    server()
